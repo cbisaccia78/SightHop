@@ -1,0 +1,12 @@
+node_modules
+dist
+.env
+.env.local
+.DS_Store
+coverage
+playwright-report
+test-results
+infra/certs/*.crt
+infra/certs/*.csr
+infra/certs/*.key
+infra/certs/*.srl

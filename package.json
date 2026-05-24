@@ -1,0 +1,19 @@
+{
+  "name": "localchat",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run build --workspace @localchat/shared && (npm run dev --workspace @localchat/server & npm run dev --workspace @localchat/web)",
+    "build": "npm run build --workspaces",
+    "test": "npm run build --workspace @localchat/shared && npm run test --workspaces --if-present",
+    "typecheck": "npm run build --workspace @localchat/shared && npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22 <26"
+  }
+}

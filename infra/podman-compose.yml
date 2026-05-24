@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: localchat
+      POSTGRES_PASSWORD: localchat
+      POSTGRES_DB: localchat
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U localchat -d localchat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: ..
+      dockerfile: apps/server/Containerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      CLIENT_ORIGIN: http://localhost:8080
+      DATABASE_URL: postgres://localchat:localchat@postgres:5432/localchat
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Containerfile
+    depends_on:
+      - server
+    ports:
+      - "8080:80"
+
+  coturn:
+    image: coturn/coturn:4.6
+    profiles: ["turn"]
+    command:
+      - --no-cli
+      - --log-file=stdout
+      - --fingerprint
+      - --lt-cred-mech
+      - --realm=localchat
+      - --user=localchat:change-me-before-enabling
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+
+volumes:
+  postgres-data:
+  redis-data:
