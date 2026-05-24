@@ -16,6 +16,7 @@ import {
   signalIcePayloadSchema,
   signalOfferPayloadSchema,
   swipeSubmitPayloadSchema,
+  type MatchCreatedPayload,
   type PublicGuestProfile
 } from "@localchat/shared";
 import { pickPartner } from "./matchmaking.js";
@@ -24,8 +25,16 @@ import type { EncounterRecord, QueueEntry, SessionRecord } from "./types.js";
 
 const fallbackAfterMs = 15_000;
 const disconnectGraceMs = 10_000;
-const iceServers = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
+const defaultIceServers: MatchCreatedPayload["iceServers"] = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" }
+];
 const defaultClientOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+type DeploymentState = {
+  draining: boolean;
+  drainStartedAt?: string;
+};
 
 function getClientOrigins() {
   const configuredOrigins = process.env.CLIENT_ORIGINS ?? process.env.CLIENT_ORIGIN;
@@ -36,6 +45,37 @@ function getClientOrigins() {
     .filter(Boolean);
 }
 
+function splitEnvList(value: string | undefined) {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getIceServers(): MatchCreatedPayload["iceServers"] {
+  const stunUrls = splitEnvList(process.env.STUN_SERVER_URLS);
+  const turnUrls = splitEnvList(process.env.TURN_SERVER_URLS);
+  const iceServers: MatchCreatedPayload["iceServers"] = stunUrls.length
+    ? stunUrls.map((urls) => ({ urls }))
+    : [...defaultIceServers];
+
+  if (!turnUrls.length) return iceServers;
+
+  const username = process.env.TURN_USERNAME?.trim();
+  const credential = process.env.TURN_PASSWORD?.trim();
+  if (!username || !credential) {
+    throw new Error("TURN_SERVER_URLS requires TURN_USERNAME and TURN_PASSWORD.");
+  }
+
+  iceServers.push({
+    urls: turnUrls.length === 1 ? turnUrls[0] : turnUrls,
+    username,
+    credential
+  });
+  return iceServers;
+}
+
 export function buildApp() {
   const app = Fastify({ logger: true, bodyLimit: 3_000_000 });
   const store = createStore(app.log);
@@ -43,6 +83,36 @@ export function buildApp() {
   const queue = new Map<string, QueueEntry>();
   const encounters = new Map<string, EncounterRecord>();
   const clientOrigins = getClientOrigins();
+  const iceServers = getIceServers();
+  const deployment: DeploymentState = { draining: false };
+  const deployAdminToken = process.env.DEPLOY_ADMIN_TOKEN?.trim();
+
+  const getDeploymentStatus = () => ({
+    draining: deployment.draining,
+    drainStartedAt: deployment.drainStartedAt,
+    queueSize: queue.size,
+    activeEncounterCount: [...encounters.values()].filter((encounter) => encounter.state !== "ended").length
+  });
+
+  const startDrain = () => {
+    deployment.draining = true;
+    deployment.drainStartedAt ??= new Date().toISOString();
+    app.log.info({ deployment: getDeploymentStatus() }, "Deployment drain mode enabled");
+  };
+
+  const stopDrain = () => {
+    deployment.draining = false;
+    deployment.drainStartedAt = undefined;
+    app.log.info("Deployment drain mode disabled");
+  };
+
+  const authorizeDeployRequest = (tokenHeader: string | string[] | undefined) => {
+    if (!deployAdminToken) return { ok: false as const, statusCode: 404, message: "Deploy admin endpoints are disabled." };
+    if (typeof tokenHeader !== "string" || tokenHeader !== deployAdminToken) {
+      return { ok: false as const, statusCode: 401, message: "Invalid deploy token." };
+    }
+    return { ok: true as const };
+  };
 
   app.register(cors, {
     origin: clientOrigins,
@@ -67,7 +137,10 @@ export function buildApp() {
     return reply.code(500).send({ message: "Internal server error" });
   });
 
-  app.post("/api/session", async () => {
+  app.post("/api/session", async (_request, reply) => {
+    if (deployment.draining) {
+      return reply.code(503).send({ message: "This server is draining for a deployment. Refresh and try again in a moment." });
+    }
     const sessionId = randomUUID();
     sessions.set(sessionId, { id: sessionId, blockedSessionIds: new Set() });
     return createSessionResponseSchema.parse({ sessionId });
@@ -104,7 +177,21 @@ export function buildApp() {
     return { ok: true };
   });
 
-  app.get("/api/health", async () => ({ ok: true, dependencies: await store.health() }));
+  app.get("/api/health", async () => ({ ok: true, dependencies: await store.health(), deployment: getDeploymentStatus() }));
+
+  app.post("/api/admin/drain/start", async (request, reply) => {
+    const auth = authorizeDeployRequest(request.headers["x-deploy-token"]);
+    if (!auth.ok) return reply.code(auth.statusCode).send({ message: auth.message });
+    startDrain();
+    return { ok: true, deployment: getDeploymentStatus() };
+  });
+
+  app.post("/api/admin/drain/stop", async (request, reply) => {
+    const auth = authorizeDeployRequest(request.headers["x-deploy-token"]);
+    if (!auth.ok) return reply.code(auth.statusCode).send({ message: auth.message });
+    stopDrain();
+    return { ok: true, deployment: getDeploymentStatus() };
+  });
 
   const io = new Server(app.server, {
     cors: {
@@ -134,6 +221,11 @@ export function buildApp() {
 
     socket.on(clientSocketEvents.queueJoin, async (raw) => {
       const payload = queueJoinPayloadSchema.parse(raw);
+      if (deployment.draining) {
+        return socket.emit(serverSocketEvents.error, {
+          message: "This server is draining for a deployment. Refresh and try again in a moment."
+        });
+      }
       if (!session.profile) return socket.emit(serverSocketEvents.error, { message: "Profile required" });
       if (session.activeEncounterId) return;
 

@@ -67,11 +67,17 @@ export const encounterEndedPayloadSchema = z.object({
 });
 export type EncounterEndedPayload = z.infer<typeof encounterEndedPayloadSchema>;
 
+export const iceServerSchema = z.object({
+  urls: z.union([z.string(), z.array(z.string())]),
+  username: z.string().optional(),
+  credential: z.string().optional()
+});
+
 export const matchCreatedPayloadSchema = z.object({
   encounterId: z.string().uuid(),
   roomId: z.string().uuid(),
   role: z.enum(["initiator", "receiver"]),
-  iceServers: z.array(z.object({ urls: z.union([z.string(), z.array(z.string())]) }))
+  iceServers: z.array(iceServerSchema)
 });
 export type MatchCreatedPayload = z.infer<typeof matchCreatedPayloadSchema>;
 
