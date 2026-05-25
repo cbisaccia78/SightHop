@@ -69,7 +69,7 @@ until curl --silent --fail "$health_url" >/dev/null; do
 done
 
 mkdir -p "$(dirname "$active_release_file")"
-printf 'set $sighthop_default_release %s;\n' "$release" > "$active_release_file"
+printf 'map "" $sighthop_default_release {\n  default %s;\n}\n' "$release" > "$active_release_file"
 nginx -t
 systemctl reload nginx
 echo "Activated release $release"
