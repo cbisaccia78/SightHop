@@ -38,6 +38,9 @@ set -a
 . "$env_file"
 set +a
 
+export DATABASE_URL="${DATABASE_URL:-postgres://${POSTGRES_USER:-sighthop}:${POSTGRES_PASSWORD:-sighthop}@host.containers.internal:${POSTGRES_HOST_PORT:-5432}/${POSTGRES_DB:-sighthop}}"
+export REDIS_URL="${REDIS_URL:-redis://host.containers.internal:${REDIS_HOST_PORT:-6379}}"
+
 if [[ "$release" == "blue" ]]; then
   export RELEASE_NAME="blue"
   export SERVER_HOST_PORT="${BLUE_SERVER_HOST_PORT:-13000}"

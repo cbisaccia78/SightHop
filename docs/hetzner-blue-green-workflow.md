@@ -35,16 +35,18 @@ The server now keeps live session, queue, encounter, and presence state in Redis
 
 ## 3. Port Layout
 
-The scripts default to these loopback-only ports on the Hetzner app VM:
+The scripts default to these host ports on the Hetzner app VM:
 
-- base Postgres: `127.0.0.1:5432`
-- base Redis: `127.0.0.1:6379`
+- base Postgres: `5432`
+- base Redis: `6379`
 - blue server: `127.0.0.1:13000`
 - blue web: `127.0.0.1:18080`
 - green server: `127.0.0.1:23000`
 - green web: `127.0.0.1:28080`
 
 You can override them through env vars if needed.
+
+Postgres and Redis are intentionally published on a host-reachable interface so release containers can connect through `host.containers.internal`. Keep `5432` and `6379` closed in the Hetzner firewall; they are not meant to be public.
 
 ## 4. Prepare The Production Env File
 
