@@ -45,9 +45,10 @@ The composed web service listens on `http://localhost:8080` and proxies API and 
 
 ## Deployment Guides
 
+- [Hetzner production runbook](docs/hetzner-prod-runbook.md)
 - [Hetzner blue-green workflow](docs/hetzner-blue-green-workflow.md)
 - [Hetzner single-VM starter guide](docs/hetzner-single-vm-deployment.md)
-- [Hetzner VM deployment guide](docs/hetzner-vm-deployment.md)
+- [Hetzner two-VM deployment guide](docs/hetzner-two-vm-deployment.md)
 - [Redis live-state migration sketch](docs/redis-live-state-plan.md)
 
 ## WebRTC Policy
