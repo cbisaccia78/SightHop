@@ -1,5 +1,5 @@
 {
-  "name": "@localchat/server",
+  "name": "@sighthop/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
-    "@localchat/shared": "file:../../packages/shared",
+    "@sighthop/shared": "file:../../packages/shared",
     "fastify": "^5.0.0",
     "ioredis": "^5.4.1",
     "pg": "^8.13.0",

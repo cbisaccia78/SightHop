@@ -1,6 +1,6 @@
 import { io as createSocket } from "socket.io-client";
 import { afterEach, describe, expect, it } from "vitest";
-import { clientSocketEvents, serverSocketEvents } from "@localchat/shared";
+import { clientSocketEvents, serverSocketEvents } from "@sighthop/shared";
 import { buildApp } from "./app.js";
 
 const previousDeployAdminToken = process.env.DEPLOY_ADMIN_TOKEN;

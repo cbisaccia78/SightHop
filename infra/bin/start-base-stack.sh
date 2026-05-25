@@ -12,4 +12,4 @@ if [[ -f "$env_file" ]]; then
   set +a
 fi
 
-podman-compose -p localchat-base -f "$compose_file" up -d
+podman-compose -p sighthop-base -f "$compose_file" up -d

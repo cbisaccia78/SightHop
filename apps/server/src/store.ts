@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyBaseLogger } from "fastify";
 import { Redis } from "ioredis";
 import { Pool } from "pg";
-import type { MetricName, ModerationPayload } from "@localchat/shared";
+import type { MetricName, ModerationPayload } from "@sighthop/shared";
 
 export type Store = {
   init(): Promise<void>;

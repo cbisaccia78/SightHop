@@ -2,13 +2,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: localchat
-      POSTGRES_PASSWORD: localchat
-      POSTGRES_DB: localchat
+      POSTGRES_USER: sighthop
+      POSTGRES_PASSWORD: sighthop
+      POSTGRES_DB: sighthop
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U localchat -d localchat"]
+      test: ["CMD-SHELL", "pg_isready -U sighthop -d sighthop"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -32,7 +32,7 @@ services:
       NODE_ENV: production
       PORT: 3000
       CLIENT_ORIGIN: http://localhost:8080
-      DATABASE_URL: postgres://localchat:localchat@postgres:5432/localchat
+      DATABASE_URL: postgres://sighthop:sighthop@postgres:5432/sighthop
       REDIS_URL: redis://redis:6379
       STUN_SERVER_URLS: ${STUN_SERVER_URLS:-}
       TURN_SERVER_URLS: ${TURN_SERVER_URLS:-}
@@ -63,8 +63,8 @@ services:
       - --log-file=stdout
       - --fingerprint
       - --lt-cred-mech
-      - --realm=${TURN_REALM:-localchat}
-      - --user=${TURN_USERNAME:-localchat}:${TURN_PASSWORD:-change-me-before-enabling}
+      - --realm=${TURN_REALM:-sighthop}
+      - --user=${TURN_USERNAME:-sighthop}:${TURN_PASSWORD:-change-me-before-enabling}
     ports:
       - "3478:3478/udp"
       - "3478:3478/tcp"

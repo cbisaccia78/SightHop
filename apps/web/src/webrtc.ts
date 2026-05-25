@@ -1,4 +1,4 @@
-import { clientSocketEvents, serverSocketEvents, type MatchCreatedPayload } from "@localchat/shared";
+import { clientSocketEvents, serverSocketEvents, type MatchCreatedPayload } from "@sighthop/shared";
 import type { Socket } from "socket.io-client";
 
 export type CallState = {

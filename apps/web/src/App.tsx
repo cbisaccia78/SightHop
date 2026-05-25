@@ -11,7 +11,7 @@ import {
   type MatchCreatedPayload,
   type MatchMode,
   type PublicGuestProfile
-} from "@localchat/shared";
+} from "@sighthop/shared";
 import { apiUrl, blockSession, createSession, reportSession, saveProfile } from "./api";
 import { createPeerCall, type CallControls, type CallState } from "./webrtc";
 
@@ -235,7 +235,7 @@ export function App() {
     <main className="shell">
       <section className="topbar">
         <div>
-          <p className="eyebrow">LocalChat</p>
+          <p className="eyebrow">SightHop</p>
           <h1>Swipe into a direct video match.</h1>
         </div>
         {profile ? <div className="mini-profile"><img src={profile.photoUrl} alt="" /><span>{profile.displayName}</span></div> : null}

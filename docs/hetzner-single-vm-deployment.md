@@ -1,6 +1,6 @@
 # Hetzner Single-VM Starter Guide
 
-This guide shows the cheapest reasonable public deployment for LocalChat on Hetzner Cloud using one Ubuntu VM.
+This guide shows the cheapest reasonable public deployment for SightHop on Hetzner Cloud using one Ubuntu VM.
 
 You will run:
 
@@ -14,7 +14,7 @@ This is the right shape if you want to launch quickly and keep costs low. It is 
 
 At the end of this guide you will have:
 
-- `https://app.example.com` serving the LocalChat app
+- `https://app.example.com` serving the SightHop app
 - `turn.example.com` resolving to the same VM for TURN fallback
 - one Hetzner VM running both the app stack and coturn
 
@@ -65,7 +65,7 @@ In the Hetzner Cloud console:
 2. Attach your SSH key.
 3. Note the VM's public IPv4 address.
 
-Name it something obvious such as `localchat-prod-1`.
+Name it something obvious such as `sighthop-prod-1`.
 
 ## 5. Configure DNS
 
@@ -115,24 +115,24 @@ sed -i 's/^#TURNSERVER_ENABLED=1/TURNSERVER_ENABLED=1/' /etc/default/coturn
 
 ```sh
 cd /opt
-git clone https://github.com/YOUR_GITHUB_USERNAME/LocalChat.git
-cd LocalChat
+git clone https://github.com/YOUR_GITHUB_USERNAME/SightHop.git
+cd SightHop
 ```
 
 ## 9. Create The App Environment File
 
-Create `/opt/LocalChat/infra/.env.production`:
+Create `/opt/SightHop/infra/.env.production`:
 
 ```sh
-cat > /opt/LocalChat/infra/.env.production <<'EOF'
+cat > /opt/SightHop/infra/.env.production <<'EOF'
 NODE_ENV=production
 PORT=3000
 CLIENT_ORIGIN=https://app.example.com
-DATABASE_URL=postgres://localchat:CHANGE_DB_PASSWORD@postgres:5432/localchat
+DATABASE_URL=postgres://sighthop:CHANGE_DB_PASSWORD@postgres:5432/sighthop
 REDIS_URL=redis://redis:6379
 STUN_SERVER_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
 TURN_SERVER_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
-TURN_USERNAME=localchat
+TURN_USERNAME=sighthop
 TURN_PASSWORD=CHANGE_TURN_PASSWORD
 EOF
 ```
@@ -147,7 +147,7 @@ Replace:
 From the repo root:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 set -a
 . infra/.env.production
 set +a
@@ -168,7 +168,7 @@ The web container should now answer on `http://127.0.0.1:8080` on the host.
 Create the Nginx site:
 
 ```sh
-cat > /etc/nginx/sites-available/localchat <<'EOF'
+cat > /etc/nginx/sites-available/sighthop <<'EOF'
 server {
   listen 80;
   server_name app.example.com;
@@ -189,7 +189,7 @@ EOF
 Enable the site:
 
 ```sh
-ln -sf /etc/nginx/sites-available/localchat /etc/nginx/sites-enabled/localchat
+ln -sf /etc/nginx/sites-available/sighthop /etc/nginx/sites-enabled/sighthop
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
@@ -213,7 +213,7 @@ listening-port=3478
 fingerprint
 lt-cred-mech
 realm=turn.example.com
-user=localchat:CHANGE_TURN_PASSWORD
+user=sighthop:CHANGE_TURN_PASSWORD
 external-ip=VM_PUBLIC_IP
 min-port=49160
 max-port=49200
@@ -257,7 +257,7 @@ systemctl status coturn --no-pager
 Check the app logs:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 podman-compose -f infra/podman-compose.yml logs -f server web
 ```
 
@@ -275,7 +275,7 @@ If restrictive-network calls still connect, TURN fallback is active.
 To deploy a new version:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 git pull
 set -a
 . infra/.env.production
@@ -286,7 +286,7 @@ podman-compose -f infra/podman-compose.yml up -d --build
 To restart the app containers:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 set -a
 . infra/.env.production
 set +a

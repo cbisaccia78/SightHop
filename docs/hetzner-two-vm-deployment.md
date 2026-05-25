@@ -1,6 +1,6 @@
 # Hetzner VM Deployment Guide
 
-This guide walks through a production-style deployment of LocalChat on Hetzner Cloud using two Ubuntu VMs:
+This guide walks through a production-style deployment of SightHop on Hetzner Cloud using two Ubuntu VMs:
 
 - one app VM for the web app, API, Socket.IO signaling, Postgres, and Redis
 - one TURN VM for coturn so restrictive networks can fall back to relay
@@ -11,7 +11,7 @@ This setup keeps costs low, matches the current repository layout, and stays por
 
 At the end of this guide you will have:
 
-- `https://app.example.com` serving the LocalChat web app
+- `https://app.example.com` serving the SightHop web app
 - the app VM running the repo's existing `podman-compose` stack
 - `turn.example.com` running coturn for TURN fallback
 - TLS on the app domain so camera and microphone access work in browsers
@@ -49,8 +49,8 @@ In the Hetzner Cloud console:
 
 Name them something obvious, for example:
 
-- `localchat-app-prod`
-- `localchat-turn-prod`
+- `sighthop-app-prod`
+- `sighthop-turn-prod`
 
 ## 4. Configure DNS
 
@@ -100,18 +100,18 @@ Clone the repository:
 
 ```sh
 cd /opt
-git clone https://github.com/YOUR_GITHUB_USERNAME/LocalChat.git
-cd LocalChat
+git clone https://github.com/YOUR_GITHUB_USERNAME/SightHop.git
+cd SightHop
 ```
 
 Create a production env file for the compose stack:
 
 ```sh
-cat > /opt/LocalChat/infra/.env.production <<'EOF'
+cat > /opt/SightHop/infra/.env.production <<'EOF'
 NODE_ENV=production
 PORT=3000
 CLIENT_ORIGIN=https://app.example.com
-DATABASE_URL=postgres://localchat:CHANGE_DB_PASSWORD@postgres:5432/localchat
+DATABASE_URL=postgres://sighthop:CHANGE_DB_PASSWORD@postgres:5432/sighthop
 REDIS_URL=redis://redis:6379
 STUN_SERVER_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
 TURN_SERVER_URLS=
@@ -127,7 +127,7 @@ Replace `CHANGE_DB_PASSWORD` with a strong password.
 From the repo root on the app VM:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 set -a
 . infra/.env.production
 set +a
@@ -150,7 +150,7 @@ Create an Nginx site on the host VM that proxies HTTPS traffic to the web contai
 Write the config:
 
 ```sh
-cat > /etc/nginx/sites-available/localchat <<'EOF'
+cat > /etc/nginx/sites-available/sighthop <<'EOF'
 server {
   listen 80;
   server_name app.example.com;
@@ -171,7 +171,7 @@ EOF
 Enable the site and reload Nginx:
 
 ```sh
-ln -sf /etc/nginx/sites-available/localchat /etc/nginx/sites-enabled/localchat
+ln -sf /etc/nginx/sites-available/sighthop /etc/nginx/sites-enabled/sighthop
 rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
@@ -214,7 +214,7 @@ listening-port=3478
 fingerprint
 lt-cred-mech
 realm=turn.example.com
-user=localchat:CHANGE_TURN_PASSWORD
+user=sighthop:CHANGE_TURN_PASSWORD
 external-ip=TURN_VM_PUBLIC_IP
 min-port=49160
 max-port=49200
@@ -248,24 +248,24 @@ ufw allow 49160:49200/udp
 
 Return to the app VM and update the env file so the server sends both STUN and TURN ICE servers to browsers.
 
-Edit `/opt/LocalChat/infra/.env.production` so it contains:
+Edit `/opt/SightHop/infra/.env.production` so it contains:
 
 ```sh
 NODE_ENV=production
 PORT=3000
 CLIENT_ORIGIN=https://app.example.com
-DATABASE_URL=postgres://localchat:CHANGE_DB_PASSWORD@postgres:5432/localchat
+DATABASE_URL=postgres://sighthop:CHANGE_DB_PASSWORD@postgres:5432/sighthop
 REDIS_URL=redis://redis:6379
 STUN_SERVER_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
 TURN_SERVER_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
-TURN_USERNAME=localchat
+TURN_USERNAME=sighthop
 TURN_PASSWORD=CHANGE_TURN_PASSWORD
 ```
 
 Restart the app stack:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 set -a
 . infra/.env.production
 set +a
@@ -287,7 +287,7 @@ curl -I https://app.example.com
 Check the running containers:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 podman ps
 podman-compose -f infra/podman-compose.yml logs -f server web
 ```
@@ -314,7 +314,7 @@ If direct peer-to-peer fails on a restrictive network but the call still connect
 To deploy a new version on the app VM:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 git pull
 set -a
 . infra/.env.production
@@ -325,7 +325,7 @@ podman-compose -f infra/podman-compose.yml up -d --build
 To restart the app stack:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 set -a
 . infra/.env.production
 set +a
@@ -335,7 +335,7 @@ podman-compose -f infra/podman-compose.yml restart
 To stop the app stack:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 set -a
 . infra/.env.production
 set +a

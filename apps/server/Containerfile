@@ -9,8 +9,8 @@ FROM deps AS build
 COPY tsconfig.base.json ./
 COPY packages/shared packages/shared
 COPY apps/server apps/server
-RUN npm run build --workspace @localchat/shared
-RUN npm run build --workspace @localchat/server
+RUN npm run build --workspace @sighthop/shared
+RUN npm run build --workspace @sighthop/server
 
 FROM node:22-alpine AS runtime
 WORKDIR /app

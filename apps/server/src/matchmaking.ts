@@ -1,4 +1,4 @@
-import type { PublicGuestProfile } from "@localchat/shared";
+import type { PublicGuestProfile } from "@sighthop/shared";
 import type { QueueEntry } from "./types.js";
 
 type ProfileMap = Map<string, PublicGuestProfile>;

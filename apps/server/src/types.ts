@@ -1,4 +1,4 @@
-import type { GuestProfile, MatchMode, SwipeDecision } from "@localchat/shared";
+import type { GuestProfile, MatchMode, SwipeDecision } from "@sighthop/shared";
 
 export type SessionRecord = {
   id: string;

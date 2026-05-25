@@ -18,7 +18,7 @@ import {
   swipeSubmitPayloadSchema,
   type MatchCreatedPayload,
   type PublicGuestProfile
-} from "@localchat/shared";
+} from "@sighthop/shared";
 import { pickPartner } from "./matchmaking.js";
 import { createStore } from "./store.js";
 import type { EncounterRecord, QueueEntry, SessionRecord } from "./types.js";

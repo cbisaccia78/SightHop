@@ -20,8 +20,8 @@ Only one color is active for new users at a time, but the previous color can kee
 - `infra/podman-compose.release.yml`: versioned app release stack
 - `infra/bin/start-base-stack.sh`: starts the base stack
 - `infra/bin/deploy-release.sh`: deploys either the blue or green release
-- `infra/nginx/localchat-blue-green.conf`: host Nginx config for sticky release routing
-- `infra/nginx/localchat-active-release.conf`: include file that selects the default active release
+- `infra/nginx/sighthop-blue-green.conf`: host Nginx config for sticky release routing
+- `infra/nginx/sighthop-active-release.conf`: include file that selects the default active release
 
 ## 2. What This Solves
 
@@ -52,12 +52,12 @@ Create `infra/.env.production` on the app VM with at least:
 
 ```sh
 CLIENT_ORIGIN=https://app.example.com
-POSTGRES_USER=localchat
+POSTGRES_USER=sighthop
 POSTGRES_PASSWORD=CHANGE_DB_PASSWORD
-POSTGRES_DB=localchat
+POSTGRES_DB=sighthop
 STUN_SERVER_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
 TURN_SERVER_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
-TURN_USERNAME=localchat
+TURN_USERNAME=sighthop
 TURN_PASSWORD=CHANGE_TURN_PASSWORD
 DEPLOY_ADMIN_TOKEN=CHANGE_DEPLOY_TOKEN
 ```
@@ -76,9 +76,9 @@ GREEN_WEB_HOST_PORT=28080
 On the Hetzner app VM:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 chmod +x infra/bin/*.sh
-ENV_FILE=/opt/LocalChat/infra/.env.production infra/bin/start-base-stack.sh
+ENV_FILE=/opt/SightHop/infra/.env.production infra/bin/start-base-stack.sh
 ```
 
 This starts the shared Postgres and Redis services that both release colors use.
@@ -88,11 +88,11 @@ This starts the shared Postgres and Redis services that both release colors use.
 Copy the sample config into the host Nginx config directory and edit the real hostname:
 
 ```sh
-cp /opt/LocalChat/infra/nginx/localchat-blue-green.conf /etc/nginx/conf.d/localchat.conf
-cp /opt/LocalChat/infra/nginx/localchat-active-release.conf /etc/nginx/conf.d/localchat-active-release.conf
+cp /opt/SightHop/infra/nginx/sighthop-blue-green.conf /etc/nginx/conf.d/sighthop.conf
+cp /opt/SightHop/infra/nginx/sighthop-active-release.conf /etc/nginx/conf.d/sighthop-active-release.conf
 ```
 
-Then edit `/etc/nginx/conf.d/localchat.conf` and replace `app.example.com` with your real hostname.
+Then edit `/etc/nginx/conf.d/sighthop.conf` and replace `app.example.com` with your real hostname.
 
 Validate and reload:
 
@@ -101,15 +101,15 @@ nginx -t
 systemctl reload nginx
 ```
 
-This host config uses a `localchat_release` cookie so existing users stay on the same release color while new users move to the current default color.
+This host config uses a `sighthop_release` cookie so existing users stay on the same release color while new users move to the current default color.
 
 ## 7. First Release Deployment
 
 Deploy `blue` first:
 
 ```sh
-cd /opt/LocalChat
-ENV_FILE=/opt/LocalChat/infra/.env.production infra/bin/deploy-release.sh blue
+cd /opt/SightHop
+ENV_FILE=/opt/SightHop/infra/.env.production infra/bin/deploy-release.sh blue
 ```
 
 What the script does:
@@ -126,9 +126,9 @@ At this point all new traffic goes to `blue`.
 When you have a new change to ship:
 
 ```sh
-cd /opt/LocalChat
+cd /opt/SightHop
 git pull
-ENV_FILE=/opt/LocalChat/infra/.env.production infra/bin/deploy-release.sh green --drain-old
+ENV_FILE=/opt/SightHop/infra/.env.production infra/bin/deploy-release.sh green --drain-old
 ```
 
 If `blue` is live, this does the following:

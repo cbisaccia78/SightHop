@@ -1,5 +1,5 @@
 {
-  "name": "localchat",
+  "name": "sighthop",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,10 +8,10 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run build --workspace @localchat/shared && (npm run dev --workspace @localchat/server & npm run dev --workspace @localchat/web)",
+    "dev": "npm run build --workspace @sighthop/shared && (npm run dev --workspace @sighthop/server & npm run dev --workspace @sighthop/web)",
     "build": "npm run build --workspaces",
-    "test": "npm run build --workspace @localchat/shared && npm run test --workspaces --if-present",
-    "typecheck": "npm run build --workspace @localchat/shared && npm run typecheck --workspaces --if-present"
+    "test": "npm run build --workspace @sighthop/shared && npm run test --workspaces --if-present",
+    "typecheck": "npm run build --workspace @sighthop/shared && npm run typecheck --workspaces --if-present"
   },
   "engines": {
     "node": ">=22 <26"

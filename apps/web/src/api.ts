@@ -1,4 +1,4 @@
-import type { CreateSessionResponse, GuestProfile, ModerationPayload } from "@localchat/shared";
+import type { CreateSessionResponse, GuestProfile, ModerationPayload } from "@sighthop/shared";
 
 const configuredApiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
 const isLoopbackHost = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);

@@ -25,7 +25,7 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 env_file="${ENV_FILE:-$repo_root/infra/.env.production}"
 compose_file="$repo_root/infra/podman-compose.release.yml"
-active_release_file="${NGINX_ACTIVE_RELEASE_FILE:-/etc/nginx/conf.d/localchat-active-release.conf}"
+active_release_file="${NGINX_ACTIVE_RELEASE_FILE:-/etc/nginx/conf.d/sighthop-active-release.conf}"
 health_timeout_seconds="${HEALTH_TIMEOUT_SECONDS:-120}"
 drain_timeout_seconds="${DRAIN_TIMEOUT_SECONDS:-1800}"
 
@@ -53,7 +53,7 @@ fi
 export CLIENT_ORIGIN
 
 echo "Starting release $release on web:$WEB_HOST_PORT server:$SERVER_HOST_PORT"
-podman-compose -p "localchat-$release" -f "$compose_file" up -d --build
+podman-compose -p "sighthop-$release" -f "$compose_file" up -d --build
 
 server_base_url="http://127.0.0.1:$SERVER_HOST_PORT"
 health_url="$server_base_url/api/health"
@@ -67,7 +67,7 @@ until curl --silent --fail "$health_url" >/dev/null; do
 done
 
 mkdir -p "$(dirname "$active_release_file")"
-printf 'set $localchat_default_release %s;\n' "$release" > "$active_release_file"
+printf 'set $sighthop_default_release %s;\n' "$release" > "$active_release_file"
 nginx -t
 systemctl reload nginx
 echo "Activated release $release"
@@ -109,5 +109,5 @@ while true; do
   sleep 5
 done
 
-podman-compose -p "localchat-$old_release" -f "$compose_file" down
+podman-compose -p "sighthop-$old_release" -f "$compose_file" down
 echo "Stopped old release $old_release"

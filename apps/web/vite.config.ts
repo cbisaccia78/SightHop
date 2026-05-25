@@ -3,9 +3,9 @@ import react from "@vitejs/plugin-react";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const certPath = resolve("../../infra/certs/localchat-dev.crt");
-const keyPath = resolve("../../infra/certs/localchat-dev.key");
-const useHttps = process.env.LOCALCHAT_HTTPS === "true" && existsSync(certPath) && existsSync(keyPath);
+const certPath = resolve("../../infra/certs/sighthop-dev.crt");
+const keyPath = resolve("../../infra/certs/sighthop-dev.key");
+const useHttps = process.env.SIGHTHOP_HTTPS === "true" && existsSync(certPath) && existsSync(keyPath);
 
 export default defineConfig({
   plugins: [react()],

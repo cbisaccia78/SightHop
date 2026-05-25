@@ -1,6 +1,6 @@
-# LocalChat MVP
+# SightHop MVP
 
-LocalChat is a web-first MVP for a P2P swipe-to-video app. Guests create a lightweight session profile, join a matching queue, swipe on one presented person at a time, and start direct WebRTC video after mutual right swipes.
+SightHop is a web-first MVP for a P2P swipe-to-video app. Guests create a lightweight session profile, join a matching queue, swipe on one presented person at a time, and start direct WebRTC video after mutual right swipes.
 
 ## Apps
 
@@ -14,9 +14,9 @@ LocalChat is a web-first MVP for a P2P swipe-to-video app. Guests create a light
 ```sh
 npm install
 cp .env.example .env
-npm run build --workspace @localchat/shared
-npm run dev --workspace @localchat/server
-npm run dev --workspace @localchat/web
+npm run build --workspace @sighthop/shared
+npm run dev --workspace @sighthop/server
+npm run dev --workspace @sighthop/web
 ```
 
 The browser app defaults to `http://localhost:5173` and the API defaults to `http://localhost:3000`.
@@ -49,7 +49,7 @@ The signaling server now builds the client ICE server list from environment vari
 ```sh
 STUN_SERVER_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
 TURN_SERVER_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
-TURN_USERNAME=localchat
+TURN_USERNAME=sighthop
 TURN_PASSWORD=replace-me
 ```
 

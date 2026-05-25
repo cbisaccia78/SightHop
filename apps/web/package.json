@@ -1,5 +1,5 @@
 {
-  "name": "@localchat/web",
+  "name": "@sighthop/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@localchat/shared": "file:../../packages/shared",
+    "@sighthop/shared": "file:../../packages/shared",
     "@vitejs/plugin-react": "^6.0.2",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",

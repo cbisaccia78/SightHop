@@ -8,7 +8,7 @@ services:
       PORT: 3000
       CLIENT_ORIGIN: ${CLIENT_ORIGIN}
       CLIENT_ORIGINS: ${CLIENT_ORIGINS:-}
-      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-localchat}:${POSTGRES_PASSWORD:-localchat}@host.containers.internal:${POSTGRES_HOST_PORT:-5432}/${POSTGRES_DB:-localchat}}
+      DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-sighthop}:${POSTGRES_PASSWORD:-sighthop}@host.containers.internal:${POSTGRES_HOST_PORT:-5432}/${POSTGRES_DB:-sighthop}}
       REDIS_URL: ${REDIS_URL:-redis://host.containers.internal:${REDIS_HOST_PORT:-6379}}
       STUN_SERVER_URLS: ${STUN_SERVER_URLS:-}
       TURN_SERVER_URLS: ${TURN_SERVER_URLS:-}
