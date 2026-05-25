@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: docker.io/library/postgres:16-alpine
     environment:
       POSTGRES_USER: sighthop
       POSTGRES_PASSWORD: sighthop
@@ -14,7 +14,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: docker.io/library/redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
@@ -56,7 +56,7 @@ services:
       - "8080:80"
 
   coturn:
-    image: coturn/coturn:4.6
+    image: docker.io/coturn/coturn:4.6
     profiles: ["turn"]
     command:
       - --no-cli

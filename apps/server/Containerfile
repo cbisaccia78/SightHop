@@ -1,4 +1,4 @@
-FROM node:22-alpine AS deps
+FROM docker.io/library/node:22-alpine AS deps
 WORKDIR /app
 COPY package.json ./
 COPY packages/shared/package.json packages/shared/package.json
@@ -12,7 +12,7 @@ COPY apps/server apps/server
 RUN npm run build --workspace @sighthop/shared
 RUN npm run build --workspace @sighthop/server
 
-FROM node:22-alpine AS runtime
+FROM docker.io/library/node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules node_modules
