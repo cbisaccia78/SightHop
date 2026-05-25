@@ -21,6 +21,18 @@ npm run dev --workspace @sighthop/web
 
 The browser app defaults to `http://localhost:5173` and the API defaults to `http://localhost:3000`.
 
+## Local Device HTTPS
+
+For phones and other devices on the same Wi-Fi, use the bundled development certificate and start the app with:
+
+```sh
+npm run dev:https
+```
+
+Then open `https://192.168.1.163:5173` on the device. The Vite dev server uses `infra/certs/sighthop-dev.crt` and `infra/certs/sighthop-dev.key` when `SIGHTHOP_HTTPS=true`.
+
+Before the device will trust that HTTPS origin, install and trust the local CA at `infra/certs/sighthop-dev-ca.crt` on the device. The bundled cert is currently issued for `localhost`, `127.0.0.1`, and `192.168.1.163`; if your Mac gets a different LAN IP, regenerate the cert or update the SAN list before using HTTPS from other devices.
+
 ## Podman Deployment Smoke Test
 
 ```sh
@@ -49,8 +61,8 @@ The signaling server now builds the client ICE server list from environment vari
 ```sh
 STUN_SERVER_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
 TURN_SERVER_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
-TURN_USERNAME=sighthop
-TURN_PASSWORD=replace-me
+TURN_USERNAME=CHANGE_TURN_USERNAME
+TURN_PASSWORD=CHANGE_TURN_PASSWORD
 ```
 
 Notes:

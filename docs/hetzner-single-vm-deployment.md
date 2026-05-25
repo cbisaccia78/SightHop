@@ -128,18 +128,21 @@ cat > /opt/SightHop/infra/.env.production <<'EOF'
 NODE_ENV=production
 PORT=3000
 CLIENT_ORIGIN=https://app.example.com
-DATABASE_URL=postgres://sighthop:CHANGE_DB_PASSWORD@postgres:5432/sighthop
+DATABASE_URL=postgres://CHANGE_DB_USER:CHANGE_DB_PASSWORD@postgres:5432/CHANGE_DB_NAME
 REDIS_URL=redis://redis:6379
 STUN_SERVER_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
 TURN_SERVER_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
-TURN_USERNAME=sighthop
+TURN_USERNAME=CHANGE_TURN_USERNAME
 TURN_PASSWORD=CHANGE_TURN_PASSWORD
 EOF
 ```
 
 Replace:
 
+- `CHANGE_DB_USER` with your database user
 - `CHANGE_DB_PASSWORD` with a strong database password
+- `CHANGE_DB_NAME` with your database name
+- `CHANGE_TURN_USERNAME` with your TURN username
 - `CHANGE_TURN_PASSWORD` with a strong TURN password
 
 ## 10. Start The App Containers

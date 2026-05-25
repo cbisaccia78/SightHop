@@ -1,16 +1,17 @@
-# Redis Live-State Migration Sketch
+# Redis Live-State Notes
 
-This document sketches the next architectural step after blue-green deploys: moving live session, queue, and encounter state out of the server process and into Redis.
+This document records the live-state architecture used by the server after the Redis migration for blue-green deploys.
 
-The current server still keeps these structures in memory:
+The server now stores these structures in Redis:
 
 - `sessions`
 - `queue`
 - `encounters`
+- `presence`
 
-That is why deploys can be low-disruption now, but not fully seamless.
+That lets two release colors share live matchmaking state during a drain window and lets clients reconnect through a release switch without losing their session record.
 
-## 1. Goals
+## 1. Current Goals
 
 The Redis migration should make these possible:
 
@@ -19,9 +20,9 @@ The Redis migration should make these possible:
 - the app can eventually run more than one server instance behind the same proxy
 - deploys no longer depend on waiting for the old process to keep in-memory state alive
 
-## 2. Scope To Move First
+## 2. Data Stored In Redis
 
-Move the minimum live state needed for match flow continuity:
+The current live-state layer stores the minimum state needed for match flow continuity:
 
 1. session records
 2. queue entries
@@ -54,68 +55,36 @@ Suggested first-pass keys:
   - set of session ids currently connected to a given release
   - useful during drain and cutover analysis
 
-## 4. Server Refactor Phases
+## 4. Next Phases
 
-### Phase 1: Store Abstraction
+### Phase 1: Hardening
 
-Split the current server logic so live-state reads and writes go through a dedicated interface instead of directly touching Maps.
+Keep the live-state abstraction narrow and add stronger operational safeguards.
 
-The first interface should cover:
+Useful hardening work includes:
 
-- create and fetch session
-- update profile
-- join and leave queue
-- create encounter
-- read and write swipe state
-- read and write call readiness
-- mark session presence
+- TTL review for long-running calls and reconnect windows
+- stronger cleanup for abandoned encounter keys
+- explicit metrics around cross-instance event forwarding
 
-Do not change behavior yet. Just isolate it.
+### Phase 2: Stronger Atomicity
 
-### Phase 2: Dual-Write Shadow Mode
-
-Keep the current in-memory Maps as the source of truth, but write the same mutations into Redis.
-
-This phase is for proving the data model, not for cutover.
-
-Success criteria:
-
-- no behavior change for users
-- Redis contains a faithful copy of live state
-- logging can compare in-memory and Redis views on critical operations
-
-### Phase 3: Read-From-Redis For Non-Critical Paths
-
-Start reading selected state from Redis where mismatch risk is low, for example:
-
-- health and deployment status counts
-- queue visibility checks
-- reconnect presence checks
-
-Keep critical match transitions conservative until confidence is higher.
-
-### Phase 4: Redis As Source Of Truth
-
-Switch the match flow to Redis-backed state transitions.
-
-At this phase, all release colors should operate on the same shared state.
-
-You will likely need Redis transactions or Lua scripts around:
+The current implementation serializes match-making through a Redis lock. If contention rises, move the critical transitions behind Redis transactions or Lua scripts around:
 
 - claiming queue partners
 - creating encounters atomically
 - applying swipes and transitioning to `matched`
 - handling disconnect grace windows safely
 
-### Phase 5: Multi-Instance Routing
+### Phase 3: Multi-Instance Routing
 
-Once Redis is authoritative, add a small pub/sub layer so one server instance can notify another when a socket-owned session needs an event.
+The server already uses a small pub/sub layer so one server instance can notify another when a socket-owned session needs an event.
 
-That means:
+Useful follow-up work here is:
 
-- release A can update state owned by release B
-- signaling events can be forwarded reliably across instances
-- deploys no longer require sticky old-release survival for correctness
+- delivery acknowledgements for critical forwarded events
+- optional replay or recovery for reconnect races
+- richer release-level observability
 
 ## 5. Risks To Design Around
 
@@ -125,15 +94,15 @@ Watch for these failure modes:
 
 - two releases matching the same queued user at the same time
 - stale disconnect timers ending encounters after a reconnect already happened elsewhere
-- socket id ownership drifting across releases
+- socket ownership drifting across releases
 - relay signaling trying to reach a socket connected to a different release
 
 ## 6. Minimal Success Definition
 
-Do not overbuild the first refactor. A good first milestone is simply:
+The current migration is successful if:
 
 - users can reconnect during a blue-green deployment without losing their live session
 - queue state survives a release shutdown
 - old and new releases can both observe the same encounter state
 
-If you achieve that, the deployment workflow becomes much more robust even before full horizontal scaling.
+Those properties make the deployment workflow much more robust even before full horizontal scaling.

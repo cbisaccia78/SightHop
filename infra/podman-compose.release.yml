@@ -6,6 +6,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
+      RELEASE_NAME: ${RELEASE_NAME:-default}
       CLIENT_ORIGIN: ${CLIENT_ORIGIN}
       CLIENT_ORIGINS: ${CLIENT_ORIGINS:-}
       DATABASE_URL: ${DATABASE_URL:-postgres://${POSTGRES_USER:-sighthop}:${POSTGRES_PASSWORD:-sighthop}@host.containers.internal:${POSTGRES_HOST_PORT:-5432}/${POSTGRES_DB:-sighthop}}

@@ -39,11 +39,13 @@ set -a
 set +a
 
 if [[ "$release" == "blue" ]]; then
+  export RELEASE_NAME="blue"
   export SERVER_HOST_PORT="${BLUE_SERVER_HOST_PORT:-13000}"
   export WEB_HOST_PORT="${BLUE_WEB_HOST_PORT:-18080}"
   old_release="green"
   old_server_port="${GREEN_SERVER_HOST_PORT:-23000}"
 else
+  export RELEASE_NAME="green"
   export SERVER_HOST_PORT="${GREEN_SERVER_HOST_PORT:-23000}"
   export WEB_HOST_PORT="${GREEN_WEB_HOST_PORT:-28080}"
   old_release="blue"

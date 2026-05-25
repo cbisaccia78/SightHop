@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
+import type { Redis } from "ioredis";
 import { Server } from "socket.io";
 import { ZodError } from "zod";
 import {
@@ -16,12 +17,11 @@ import {
   signalIcePayloadSchema,
   signalOfferPayloadSchema,
   swipeSubmitPayloadSchema,
-  type MatchCreatedPayload,
-  type PublicGuestProfile
+  type MatchCreatedPayload
 } from "@sighthop/shared";
-import { pickPartner } from "./matchmaking.js";
+import { createLiveState } from "./live-state.js";
 import { createStore } from "./store.js";
-import type { EncounterRecord, QueueEntry, SessionRecord } from "./types.js";
+import type { EncounterRecord } from "./types.js";
 
 const fallbackAfterMs = 15_000;
 const disconnectGraceMs = 10_000;
@@ -34,6 +34,14 @@ const defaultClientOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
 type DeploymentState = {
   draining: boolean;
   drainStartedAt?: string;
+};
+
+type BuildAppOptions = {
+  redisUrl?: string;
+  liveStateKeyPrefix?: string;
+  releaseName?: string;
+  instanceId?: string;
+  redisFactory?: () => Redis;
 };
 
 function getClientOrigins() {
@@ -76,34 +84,44 @@ function getIceServers(): MatchCreatedPayload["iceServers"] {
   return iceServers;
 }
 
-export function buildApp() {
+export function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({ logger: true, bodyLimit: 3_000_000 });
   const store = createStore(app.log);
-  const sessions = new Map<string, SessionRecord>();
-  const queue = new Map<string, QueueEntry>();
-  const encounters = new Map<string, EncounterRecord>();
   const clientOrigins = getClientOrigins();
   const iceServers = getIceServers();
   const deployment: DeploymentState = { draining: false };
   const deployAdminToken = process.env.DEPLOY_ADMIN_TOKEN?.trim();
-
-  const getDeploymentStatus = () => ({
-    draining: deployment.draining,
-    drainStartedAt: deployment.drainStartedAt,
-    queueSize: queue.size,
-    activeEncounterCount: [...encounters.values()].filter((encounter) => encounter.state !== "ended").length
+  const releaseName = options.releaseName ?? process.env.RELEASE_NAME?.trim() ?? "default";
+  const instanceId = options.instanceId ?? randomUUID();
+  const liveState = createLiveState({
+    logger: app.log,
+    redisUrl: options.redisUrl ?? process.env.REDIS_URL,
+    instanceId,
+    keyPrefix: options.liveStateKeyPrefix ?? process.env.LIVE_STATE_KEY_PREFIX,
+    redisFactory: options.redisFactory
   });
+  const localSockets = new Map<string, string>();
+  const disconnectTimers = new Map<string, NodeJS.Timeout>();
 
-  const startDrain = () => {
-    deployment.draining = true;
-    deployment.drainStartedAt ??= new Date().toISOString();
-    app.log.info({ deployment: getDeploymentStatus() }, "Deployment drain mode enabled");
+  const getDeploymentStatus = async () => {
+    const counts = await liveState.getDeploymentCounts(releaseName);
+    return {
+      draining: deployment.draining,
+      drainStartedAt: deployment.drainStartedAt,
+      ...counts
+    };
   };
 
-  const stopDrain = () => {
+  const startDrain = async () => {
+    deployment.draining = true;
+    deployment.drainStartedAt ??= new Date().toISOString();
+    app.log.info({ deployment: await getDeploymentStatus() }, "Deployment drain mode enabled");
+  };
+
+  const stopDrain = async () => {
     deployment.draining = false;
     deployment.drainStartedAt = undefined;
-    app.log.info("Deployment drain mode disabled");
+    app.log.info({ deployment: await getDeploymentStatus() }, "Deployment drain mode disabled");
   };
 
   const authorizeDeployRequest = (tokenHeader: string | string[] | undefined) => {
@@ -141,22 +159,21 @@ export function buildApp() {
     if (deployment.draining) {
       return reply.code(503).send({ message: "This server is draining for a deployment. Refresh and try again in a moment." });
     }
-    const sessionId = randomUUID();
-    sessions.set(sessionId, { id: sessionId, blockedSessionIds: new Set() });
-    return createSessionResponseSchema.parse({ sessionId });
+    const session = await liveState.createSession();
+    return createSessionResponseSchema.parse({ sessionId: session.id });
   });
 
   app.post("/api/profile", async (request, reply) => {
-    const session = requireSession(request.headers["x-session-id"], sessions);
-    if (!session) return reply.code(401).send({ message: "Unknown session" });
-
+    const sessionId = getSessionIdFromHeader(request.headers["x-session-id"]);
+    if (!sessionId) return reply.code(401).send({ message: "Unknown session" });
     const profile = guestProfileSchema.parse(request.body);
-    session.profile = profile;
+    const updated = await liveState.updateProfile(sessionId, profile);
+    if (!updated) return reply.code(401).send({ message: "Unknown session" });
     return { ok: true };
   });
 
   app.post("/api/report", async (request, reply) => {
-    const session = requireSession(request.headers["x-session-id"], sessions);
+    const session = await requireSession(request.headers["x-session-id"], liveState);
     if (!session) return reply.code(401).send({ message: "Unknown session" });
 
     const payload = moderationPayloadSchema.parse(request.body);
@@ -166,31 +183,31 @@ export function buildApp() {
   });
 
   app.post("/api/block", async (request, reply) => {
-    const session = requireSession(request.headers["x-session-id"], sessions);
+    const session = await requireSession(request.headers["x-session-id"], liveState);
     if (!session) return reply.code(401).send({ message: "Unknown session" });
 
     const payload = moderationPayloadSchema.parse(request.body);
-    session.blockedSessionIds.add(payload.targetSessionId);
+    await liveState.addBlock(session.id, payload.targetSessionId);
     await store.saveBlock(session.id, payload);
     await store.recordMetric("block", { sessionId: session.id, targetSessionId: payload.targetSessionId });
-    endEncounter(io, encounters, sessions, payload.encounterId, "blocked");
+    await endEncounter(io, liveState, localSockets, instanceId, payload.encounterId, "blocked");
     return { ok: true };
   });
 
-  app.get("/api/health", async () => ({ ok: true, dependencies: await store.health(), deployment: getDeploymentStatus() }));
+  app.get("/api/health", async () => ({ ok: true, dependencies: await store.health(), deployment: await getDeploymentStatus() }));
 
   app.post("/api/admin/drain/start", async (request, reply) => {
     const auth = authorizeDeployRequest(request.headers["x-deploy-token"]);
     if (!auth.ok) return reply.code(auth.statusCode).send({ message: auth.message });
-    startDrain();
-    return { ok: true, deployment: getDeploymentStatus() };
+    await startDrain();
+    return { ok: true, deployment: await getDeploymentStatus() };
   });
 
   app.post("/api/admin/drain/stop", async (request, reply) => {
     const auth = authorizeDeployRequest(request.headers["x-deploy-token"]);
     if (!auth.ok) return reply.code(auth.statusCode).send({ message: auth.message });
-    stopDrain();
-    return { ok: true, deployment: getDeploymentStatus() };
+    await stopDrain();
+    return { ok: true, deployment: await getDeploymentStatus() };
   });
 
   const io = new Server(app.server, {
@@ -200,24 +217,71 @@ export function buildApp() {
     }
   });
 
+  liveState.onMessage((message) => {
+    if (message.targetInstanceId !== instanceId) return;
+    if (message.type === "emit") {
+      const socketId = localSockets.get(message.sessionId);
+      if (socketId) {
+        io.to(socketId).emit(message.event, message.payload);
+      }
+      return;
+    }
+
+    const socketId = localSockets.get(message.sessionId);
+    if (socketId && socketId === message.socketId) {
+      io.sockets.sockets.get(socketId)?.disconnect(true);
+    }
+  });
+
   io.use((socket, next) => {
-    const sessionId = socket.handshake.auth.sessionId;
-    const session = typeof sessionId === "string" ? sessions.get(sessionId) : undefined;
-    if (!session) return next(new Error("Unknown session"));
-    socket.data.sessionId = sessionId;
-    next();
+    void (async () => {
+      const sessionId = socket.handshake.auth.sessionId;
+      const session = typeof sessionId === "string" ? await liveState.getSession(sessionId) : undefined;
+      if (!session) return next(new Error("Unknown session"));
+      socket.data.sessionId = sessionId;
+      next();
+    })().catch((error) => next(error instanceof Error ? error : new Error("Unknown session")));
   });
 
   io.on("connection", (socket) => {
-    const session = sessions.get(socket.data.sessionId)!;
-    if (session.disconnectTimer) {
-      clearTimeout(session.disconnectTimer);
-      session.disconnectTimer = undefined;
+    const sessionId = socket.data.sessionId as string;
+    const existingTimer = disconnectTimers.get(sessionId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      disconnectTimers.delete(sessionId);
     }
-    if (session.socketId && session.socketId !== socket.id) {
-      io.sockets.sockets.get(session.socketId)?.disconnect(true);
-    }
-    session.socketId = socket.id;
+
+    void (async () => {
+      const previousPresence = await liveState.setPresence({
+        sessionId,
+        socketId: socket.id,
+        instanceId,
+        releaseName,
+        updatedAt: Date.now()
+      });
+      if (!previousPresence || previousPresence.socketId === socket.id) {
+        localSockets.set(sessionId, socket.id);
+        return;
+      }
+      if (previousPresence.instanceId === instanceId) {
+        io.sockets.sockets.get(previousPresence.socketId)?.disconnect(true);
+      } else {
+        await liveState.publishMessage({
+          type: "disconnect",
+          targetInstanceId: previousPresence.instanceId,
+          sessionId,
+          socketId: previousPresence.socketId
+        });
+      }
+      localSockets.set(sessionId, socket.id);
+    })().catch((error) => {
+      app.log.error({ error, sessionId }, "Failed to register session presence");
+      socket.disconnect(true);
+    });
+
+    const heartbeat = setInterval(() => {
+      void liveState.refreshPresence(sessionId, socket.id, instanceId);
+    }, 10_000);
 
     socket.on(clientSocketEvents.queueJoin, async (raw) => {
       const payload = queueJoinPayloadSchema.parse(raw);
@@ -226,185 +290,199 @@ export function buildApp() {
           message: "This server is draining for a deployment. Refresh and try again in a moment."
         });
       }
-      if (!session.profile) return socket.emit(serverSocketEvents.error, { message: "Profile required" });
+      const session = await liveState.getSession(sessionId);
+      if (!session?.profile) return socket.emit(serverSocketEvents.error, { message: "Profile required" });
       if (session.activeEncounterId) return;
 
-      queue.set(session.id, { sessionId: session.id, matchMode: payload.matchMode, joinedAt: Date.now() });
+      await liveState.joinQueue(sessionId, payload.matchMode);
       socket.emit(serverSocketEvents.queueWaiting, { matchMode: payload.matchMode, fallbackAfterMs });
-      await store.recordMetric("queue_join", { sessionId: session.id, matchMode: payload.matchMode });
-      await attemptMatch(io, store, sessions, queue, encounters, session.id);
+      await store.recordMetric("queue_join", { sessionId, matchMode: payload.matchMode });
+
+      const match = await liveState.attemptMatch(sessionId);
+      if (!match) return;
+
+      await store.recordMetric("pair_presented", {
+        encounterId: match.encounter.id,
+        matchMode: match.encounter.matchMode
+      });
+
+      await emitToSession(io, liveState, localSockets, instanceId, match.encounter.sessionIds[0], serverSocketEvents.encounterPresented, {
+        encounterId: match.encounter.id,
+        counterpart: match.counterpartProfiles[match.encounter.sessionIds[0]],
+        matchMode: match.encounter.matchMode
+      });
+      await emitToSession(io, liveState, localSockets, instanceId, match.encounter.sessionIds[1], serverSocketEvents.encounterPresented, {
+        encounterId: match.encounter.id,
+        counterpart: match.counterpartProfiles[match.encounter.sessionIds[1]],
+        matchMode: match.encounter.matchMode
+      });
     });
 
     socket.on(clientSocketEvents.queueLeave, () => {
-      queue.delete(session.id);
+      void liveState.leaveQueue(sessionId);
     });
 
     socket.on(clientSocketEvents.swipeSubmit, async (raw) => {
       const payload = swipeSubmitPayloadSchema.parse(raw);
-      const encounter = encounters.get(payload.encounterId);
-      if (!encounter || !encounter.sessionIds.includes(session.id) || encounter.state !== "presented") return;
+      const result = await liveState.applySwipe(sessionId, payload.encounterId, payload.decision);
+      if (result.type === "ignored") return;
 
-      encounter.swipes[session.id] = payload.decision;
       await store.recordMetric(payload.decision === "right" ? "swipe_right" : "swipe_left", {
-        sessionId: session.id,
-        encounterId: encounter.id
+        sessionId,
+        encounterId: payload.encounterId
       });
 
-      if (payload.decision === "left") {
-        endEncounter(io, encounters, sessions, encounter.id, "left_swipe");
+      if (result.type === "ended") {
+        await notifyEncounterEnded(io, liveState, localSockets, instanceId, result.encounter, "left_swipe");
         return;
       }
 
-      const [a, b] = encounter.sessionIds;
-      if (encounter.swipes[a] === "right" && encounter.swipes[b] === "right") {
-        encounter.state = "matched";
-        encounter.roomId = randomUUID();
-        await store.recordMetric("mutual_match", { encounterId: encounter.id });
-        await store.recordMetric("call_start", { encounterId: encounter.id });
-        emitToSession(io, sessions, a, serverSocketEvents.matchCreated, {
-          encounterId: encounter.id,
-          roomId: encounter.roomId,
+      if (result.type === "matched") {
+        const [a, b] = result.encounter.sessionIds;
+        await store.recordMetric("mutual_match", { encounterId: result.encounter.id });
+        await store.recordMetric("call_start", { encounterId: result.encounter.id });
+        await emitToSession(io, liveState, localSockets, instanceId, a, serverSocketEvents.matchCreated, {
+          encounterId: result.encounter.id,
+          roomId: result.encounter.roomId,
           role: "initiator",
           iceServers
         });
-        emitToSession(io, sessions, b, serverSocketEvents.matchCreated, {
-          encounterId: encounter.id,
-          roomId: encounter.roomId,
+        await emitToSession(io, liveState, localSockets, instanceId, b, serverSocketEvents.matchCreated, {
+          encounterId: result.encounter.id,
+          roomId: result.encounter.roomId,
           role: "receiver",
           iceServers
         });
       }
     });
 
-    socket.on(clientSocketEvents.signalOffer, (raw) => relaySignal(io, sessions, encounters, session.id, signalOfferPayloadSchema.parse(raw), serverSocketEvents.signalOffer));
-    socket.on(clientSocketEvents.signalAnswer, (raw) => relaySignal(io, sessions, encounters, session.id, signalAnswerPayloadSchema.parse(raw), serverSocketEvents.signalAnswer));
-    socket.on(clientSocketEvents.signalIce, (raw) => relaySignal(io, sessions, encounters, session.id, signalIcePayloadSchema.parse(raw), serverSocketEvents.signalIce));
+    socket.on(clientSocketEvents.signalOffer, (raw) => {
+      void relaySignal(io, liveState, localSockets, instanceId, sessionId, signalOfferPayloadSchema.parse(raw), serverSocketEvents.signalOffer);
+    });
+    socket.on(clientSocketEvents.signalAnswer, (raw) => {
+      void relaySignal(io, liveState, localSockets, instanceId, sessionId, signalAnswerPayloadSchema.parse(raw), serverSocketEvents.signalAnswer);
+    });
+    socket.on(clientSocketEvents.signalIce, (raw) => {
+      void relaySignal(io, liveState, localSockets, instanceId, sessionId, signalIcePayloadSchema.parse(raw), serverSocketEvents.signalIce);
+    });
 
-    socket.on(clientSocketEvents.callReady, (raw) => {
+    socket.on(clientSocketEvents.callReady, async (raw) => {
       const payload = callReadyPayloadSchema.parse(raw);
-      const encounter = encounters.get(payload.encounterId);
-      if (!encounter || encounter.state !== "matched" || !encounter.sessionIds.includes(session.id)) return;
-      encounter.readySessionIds ??= new Set();
-      encounter.readySessionIds.add(session.id);
-      if (encounter.sessionIds.every((sessionId) => encounter.readySessionIds?.has(sessionId))) {
-        for (const sessionId of encounter.sessionIds) {
-          emitToSession(io, sessions, sessionId, serverSocketEvents.callReady, { encounterId: encounter.id });
-        }
+      const readySessionIds = await liveState.markCallReady(sessionId, payload.encounterId);
+      if (!readySessionIds) return;
+      for (const readySessionId of readySessionIds) {
+        await emitToSession(io, liveState, localSockets, instanceId, readySessionId, serverSocketEvents.callReady, {
+          encounterId: payload.encounterId
+        });
       }
     });
 
     socket.on(clientSocketEvents.callEnd, async (raw) => {
       const payload = callEndPayloadSchema.parse(raw);
       await store.recordMetric(payload.reason === "ice_failed" ? "ice_failure" : "call_end", {
-        sessionId: session.id,
+        sessionId,
         encounterId: payload.encounterId
       });
       if (payload.reason === "ice_failed") {
-        const otherId = otherSessionId(encounters.get(payload.encounterId), session.id);
-        if (otherId) emitToSession(io, sessions, otherId, serverSocketEvents.callFailed, { encounterId: payload.encounterId });
+        const encounter = await liveState.getEncounter(payload.encounterId);
+        const otherId = otherSessionId(encounter, sessionId);
+        if (otherId) {
+          await emitToSession(io, liveState, localSockets, instanceId, otherId, serverSocketEvents.callFailed, {
+            encounterId: payload.encounterId
+          });
+        }
       }
-      endEncounter(io, encounters, sessions, payload.encounterId, payload.reason);
+      await endEncounter(io, liveState, localSockets, instanceId, payload.encounterId, payload.reason);
     });
 
     socket.on("disconnect", () => {
-      if (session.socketId !== socket.id) return;
-      session.socketId = undefined;
-      session.disconnectTimer = setTimeout(() => {
-        if (session.socketId) return;
-        queue.delete(session.id);
-        session.disconnectTimer = undefined;
-        endEncounter(io, encounters, sessions, session.activeEncounterId, "disconnected");
+      clearInterval(heartbeat);
+      if (localSockets.get(sessionId) !== socket.id) return;
+      localSockets.delete(sessionId);
+      void liveState.clearPresence(sessionId, socket.id, instanceId);
+      const timer = setTimeout(() => {
+        disconnectTimers.delete(sessionId);
+        void (async () => {
+          const presence = await liveState.getPresence(sessionId);
+          if (presence) return;
+          await liveState.leaveQueue(sessionId);
+          const session = await liveState.getSession(sessionId);
+          await endEncounter(io, liveState, localSockets, instanceId, session?.activeEncounterId, "disconnected");
+        })().catch((error) => {
+          app.log.error({ error, sessionId }, "Failed to finalize disconnect cleanup");
+        });
       }, disconnectGraceMs);
+      disconnectTimers.set(sessionId, timer);
     });
   });
 
   app.addHook("onReady", async () => {
     await store.init();
+    await liveState.init();
   });
 
   app.addHook("onClose", async () => {
-    await store.close();
+    for (const timer of disconnectTimers.values()) {
+      clearTimeout(timer);
+    }
+    disconnectTimers.clear();
+    await Promise.all([store.close(), liveState.close()]);
   });
 
   return app;
 }
 
-async function attemptMatch(
+async function requireSession(header: string | string[] | undefined, liveState: ReturnType<typeof createLiveState>) {
+  const sessionId = getSessionIdFromHeader(header);
+  return sessionId ? liveState.getSession(sessionId) : undefined;
+}
+
+function getSessionIdFromHeader(header: string | string[] | undefined) {
+  return typeof header === "string" ? header : undefined;
+}
+
+async function emitToSession(
   io: Server,
-  store: ReturnType<typeof createStore>,
-  sessions: Map<string, SessionRecord>,
-  queue: Map<string, QueueEntry>,
-  encounters: Map<string, EncounterRecord>,
-  sessionId: string
+  liveState: ReturnType<typeof createLiveState>,
+  localSockets: Map<string, string>,
+  instanceId: string,
+  sessionId: string,
+  event: string,
+  payload: unknown
 ) {
-  const entry = queue.get(sessionId);
-  const session = sessions.get(sessionId);
-  if (!entry || !session?.profile) return;
-
-  for (const [queuedSessionId] of queue) {
-    if (!sessions.get(queuedSessionId)?.socketId) queue.delete(queuedSessionId);
+  const presence = await liveState.getPresence(sessionId);
+  if (!presence) return;
+  if (presence.instanceId === instanceId) {
+    const socketId = localSockets.get(sessionId);
+    if (socketId) {
+      io.to(socketId).emit(event, payload);
+    }
+    return;
   }
-
-  const profiles = new Map<string, PublicGuestProfile>();
-  const blocks = new Map<string, Set<string>>();
-  for (const liveSession of sessions.values()) {
-    if (liveSession.profile && liveSession.socketId) profiles.set(liveSession.id, { sessionId: liveSession.id, ...liveSession.profile });
-    blocks.set(liveSession.id, liveSession.blockedSessionIds);
-  }
-
-  const partner = pickPartner(entry, [...queue.values()], profiles, blocks);
-  if (!partner) return;
-
-  queue.delete(entry.sessionId);
-  queue.delete(partner.sessionId);
-
-  const encounter: EncounterRecord = {
-    id: randomUUID(),
-    sessionIds: [entry.sessionId, partner.sessionId],
-    matchMode: entry.matchMode,
-    state: "presented",
-    swipes: {},
-    createdAt: Date.now()
-  };
-  encounters.set(encounter.id, encounter);
-  sessions.get(entry.sessionId)!.activeEncounterId = encounter.id;
-  sessions.get(partner.sessionId)!.activeEncounterId = encounter.id;
-
-  await store.recordMetric("pair_presented", { encounterId: encounter.id, matchMode: encounter.matchMode });
-
-  emitToSession(io, sessions, entry.sessionId, serverSocketEvents.encounterPresented, {
-    encounterId: encounter.id,
-    counterpart: profiles.get(partner.sessionId),
-    matchMode: encounter.matchMode
-  });
-  emitToSession(io, sessions, partner.sessionId, serverSocketEvents.encounterPresented, {
-    encounterId: encounter.id,
-    counterpart: profiles.get(entry.sessionId),
-    matchMode: encounter.matchMode
+  await liveState.publishMessage({
+    type: "emit",
+    targetInstanceId: presence.instanceId,
+    sessionId,
+    event,
+    payload
   });
 }
 
-function requireSession(header: string | string[] | undefined, sessions: Map<string, SessionRecord>) {
-  return typeof header === "string" ? sessions.get(header) : undefined;
-}
-
-function emitToSession(io: Server, sessions: Map<string, SessionRecord>, sessionId: string, event: string, payload: unknown) {
-  const socketId = sessions.get(sessionId)?.socketId;
-  if (socketId) io.to(socketId).emit(event, payload);
-}
-
-function relaySignal(
+async function relaySignal(
   io: Server,
-  sessions: Map<string, SessionRecord>,
-  encounters: Map<string, EncounterRecord>,
+  liveState: ReturnType<typeof createLiveState>,
+  localSockets: Map<string, string>,
+  instanceId: string,
   senderId: string,
   payload: { encounterId: string },
   event: string
 ) {
-  const encounter = encounters.get(payload.encounterId);
+  const encounter = await liveState.getEncounter(payload.encounterId);
   if (!encounter || encounter.state !== "matched") return;
   const targetId = otherSessionId(encounter, senderId);
-  if (targetId) emitToSession(io, sessions, targetId, event, payload);
+  if (targetId) {
+    await emitToSession(io, liveState, localSockets, instanceId, targetId, event, payload);
+  }
 }
 
 function otherSessionId(encounter: EncounterRecord | undefined, sessionId: string) {
@@ -412,20 +490,31 @@ function otherSessionId(encounter: EncounterRecord | undefined, sessionId: strin
   return encounter.sessionIds[0] === sessionId ? encounter.sessionIds[1] : encounter.sessionIds[0];
 }
 
-function endEncounter(
+async function endEncounter(
   io: Server,
-  encounters: Map<string, EncounterRecord>,
-  sessions: Map<string, SessionRecord>,
+  liveState: ReturnType<typeof createLiveState>,
+  localSockets: Map<string, string>,
+  instanceId: string,
   encounterId: string | undefined,
   reason: "left_swipe" | "hangup" | "blocked" | "disconnected" | "ice_failed"
 ) {
-  if (!encounterId) return;
-  const encounter = encounters.get(encounterId);
-  if (!encounter || encounter.state === "ended") return;
-  encounter.state = "ended";
+  const encounter = await liveState.endEncounter(encounterId);
+  if (!encounter) return;
+  await notifyEncounterEnded(io, liveState, localSockets, instanceId, encounter, reason);
+}
+
+async function notifyEncounterEnded(
+  io: Server,
+  liveState: ReturnType<typeof createLiveState>,
+  localSockets: Map<string, string>,
+  instanceId: string,
+  encounter: EncounterRecord,
+  reason: "left_swipe" | "hangup" | "blocked" | "disconnected" | "ice_failed"
+) {
   for (const sessionId of encounter.sessionIds) {
-    const session = sessions.get(sessionId);
-    if (session?.activeEncounterId === encounterId) session.activeEncounterId = undefined;
-    emitToSession(io, sessions, sessionId, serverSocketEvents.encounterEnded, { encounterId, reason });
+    await emitToSession(io, liveState, localSockets, instanceId, sessionId, serverSocketEvents.encounterEnded, {
+      encounterId: encounter.id,
+      reason
+    });
   }
 }

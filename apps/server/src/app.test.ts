@@ -1,4 +1,6 @@
 import { io as createSocket } from "socket.io-client";
+import type { Redis } from "ioredis";
+import RedisMock from "ioredis-mock";
 import { afterEach, describe, expect, it } from "vitest";
 import { clientSocketEvents, serverSocketEvents } from "@sighthop/shared";
 import { buildApp } from "./app.js";
@@ -135,5 +137,117 @@ describe("REST API", () => {
 
     socket.close();
     await app.close();
+  });
+
+  it("shares live sessions and matches across release instances when Redis-backed", async () => {
+    const liveStateKeyPrefix = `test-live-state-${Date.now()}`;
+    const mockRedisPort = 6391;
+    const redisFactory = () => new RedisMock(mockRedisPort) as unknown as Redis;
+    const cleanupRedis = redisFactory();
+    const blue = buildApp({
+      releaseName: "blue",
+      instanceId: "blue-instance",
+      liveStateKeyPrefix,
+      redisFactory
+    });
+    const green = buildApp({
+      releaseName: "green",
+      instanceId: "green-instance",
+      liveStateKeyPrefix,
+      redisFactory
+    });
+
+    await blue.listen({ port: 0, host: "127.0.0.1" });
+    await green.listen({ port: 0, host: "127.0.0.1" });
+
+    const blueAddress = blue.server.address();
+    const greenAddress = green.server.address();
+    if (!blueAddress || typeof blueAddress === "string") throw new Error("Expected blue TCP address");
+    if (!greenAddress || typeof greenAddress === "string") throw new Error("Expected green TCP address");
+
+    const blueSession = (await blue.inject({ method: "POST", url: "/api/session" })).json<{ sessionId: string }>();
+    const greenSession = (await green.inject({ method: "POST", url: "/api/session" })).json<{ sessionId: string }>();
+
+    await blue.inject({
+      method: "POST",
+      url: "/api/profile",
+      headers: { "x-session-id": blueSession.sessionId },
+      payload: {
+        displayName: "Blue",
+        photoUrl: "data:image/png;base64,abc",
+        bio: "Blue bio",
+        cityRegion: "Brooklyn",
+        interestTags: ["music"]
+      }
+    });
+    await green.inject({
+      method: "POST",
+      url: "/api/profile",
+      headers: { "x-session-id": greenSession.sessionId },
+      payload: {
+        displayName: "Green",
+        photoUrl: "data:image/png;base64,abc",
+        bio: "Green bio",
+        cityRegion: "Brooklyn",
+        interestTags: ["music"]
+      }
+    });
+
+    const blueSocket = createSocket(`http://127.0.0.1:${blueAddress.port}`, {
+      auth: { sessionId: blueSession.sessionId },
+      transports: ["websocket"]
+    });
+    const greenSocket = createSocket(`http://127.0.0.1:${greenAddress.port}`, {
+      auth: { sessionId: greenSession.sessionId },
+      transports: ["websocket"]
+    });
+
+    await Promise.all([
+      new Promise<void>((resolve, reject) => {
+        blueSocket.once("connect", () => resolve());
+        blueSocket.once("connect_error", (error) => reject(error));
+      }),
+      new Promise<void>((resolve, reject) => {
+        greenSocket.once("connect", () => resolve());
+        greenSocket.once("connect_error", (error) => reject(error));
+      })
+    ]);
+
+    const blueEncounter = new Promise<{ encounterId: string; counterpart: { sessionId: string } }>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Timed out waiting for blue encounter")), 3_000);
+      blueSocket.once(serverSocketEvents.encounterPresented, (payload) => {
+        clearTimeout(timeout);
+        resolve(payload as { encounterId: string; counterpart: { sessionId: string } });
+      });
+    });
+    const greenEncounter = new Promise<{ encounterId: string; counterpart: { sessionId: string } }>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Timed out waiting for green encounter")), 3_000);
+      greenSocket.once(serverSocketEvents.encounterPresented, (payload) => {
+        clearTimeout(timeout);
+        resolve(payload as { encounterId: string; counterpart: { sessionId: string } });
+      });
+    });
+
+    blueSocket.emit(clientSocketEvents.queueJoin, { matchMode: "random" });
+    greenSocket.emit(clientSocketEvents.queueJoin, { matchMode: "random" });
+
+    const [bluePayload, greenPayload] = await Promise.all([blueEncounter, greenEncounter]);
+
+    expect(bluePayload.encounterId).toBe(greenPayload.encounterId);
+    expect(bluePayload.counterpart.sessionId).toBe(greenSession.sessionId);
+    expect(greenPayload.counterpart.sessionId).toBe(blueSession.sessionId);
+
+    const blueHealth = await blue.inject({ method: "GET", url: "/api/health" });
+    const greenHealth = await green.inject({ method: "GET", url: "/api/health" });
+
+    expect(blueHealth.json<{ deployment: { activeEncounterCount: number } }>().deployment.activeEncounterCount).toBe(1);
+    expect(greenHealth.json<{ deployment: { activeEncounterCount: number } }>().deployment.activeEncounterCount).toBe(1);
+
+    blueSocket.close();
+    greenSocket.close();
+    await blue.close();
+    await green.close();
+    await cleanupRedis.flushall();
+    await cleanupRedis.quit();
   });
 });

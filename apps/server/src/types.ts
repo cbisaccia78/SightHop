@@ -7,6 +7,7 @@ export type SessionRecord = {
   disconnectTimer?: NodeJS.Timeout;
   blockedSessionIds: Set<string>;
   activeEncounterId?: string;
+  lastReleaseName?: string;
 };
 
 export type QueueEntry = {

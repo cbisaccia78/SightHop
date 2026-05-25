@@ -31,7 +31,7 @@ This workflow gives you three things:
 - existing users can stay pinned to the old release during a drain window
 - the old release can stop accepting new queue joins before it is shut down
 
-It does not fully solve seamless reconnects across releases yet, because live session and queue state are still in the server process. That is what the Redis migration sketch is for.
+The server now keeps live session, queue, encounter, and presence state in Redis so both release colors can observe the same match flow during a drain window.
 
 ## 3. Port Layout
 
@@ -52,14 +52,14 @@ Create `infra/.env.production` on the app VM with at least:
 
 ```sh
 CLIENT_ORIGIN=https://app.example.com
-POSTGRES_USER=sighthop
+POSTGRES_USER=CHANGE_POSTGRES_USER
 POSTGRES_PASSWORD=CHANGE_DB_PASSWORD
-POSTGRES_DB=sighthop
+POSTGRES_DB=CHANGE_DB_NAME
 STUN_SERVER_URLS=stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302
 TURN_SERVER_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp
-TURN_USERNAME=sighthop
+TURN_USERNAME=CHANGE_TURN_USERNAME
 TURN_PASSWORD=CHANGE_TURN_PASSWORD
-DEPLOY_ADMIN_TOKEN=CHANGE_DEPLOY_TOKEN
+DEPLOY_ADMIN_TOKEN=CHANGE_DEPLOY_ADMIN_TOKEN
 ```
 
 If you want to override host ports, you can also add:
@@ -153,7 +153,7 @@ When drain mode is enabled on the old release:
 - existing connections and active encounters are left alone
 - `/api/health` reports `deployment.draining`, `deployment.queueSize`, and `deployment.activeEncounterCount`
 
-That is enough for a first low-disruption deployment loop while live state still lives in process memory.
+Because those counts now come from shared Redis-backed live state, they stay accurate even while both release colors are running.
 
 ## 10. Operational Rules
 
@@ -166,12 +166,12 @@ If you want this workflow to stay stable, keep these rules:
 
 ## 11. What Still Causes User Disruption Today
 
-This workflow reduces disruption, but it does not eliminate it entirely yet.
+This workflow is substantially more robust now that live state is shared through Redis, but it still has limits.
 
 The current limitations are:
 
-- if an old client loses its socket and reconnects after the old release is gone, its in-memory session is gone too
 - if you deploy a breaking protocol change, old and new clients may disagree during the drain window
 - if the host VM itself goes down, both release colors and the in-memory live state go with it
+- if the host VM itself goes down, both release colors and the Redis-backed live state on that VM go with it
 
-Those are exactly the problems the Redis live-state plan is meant to solve next.
+For zero-downtime infrastructure failures or larger horizontal scaling, you would still move Redis off-box and harden cross-instance signaling further.
